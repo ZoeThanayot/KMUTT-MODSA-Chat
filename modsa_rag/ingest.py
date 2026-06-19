@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Iterable
 
 import chromadb
 from chromadb.errors import NotFoundError
 from langchain_community.embeddings import OllamaEmbeddings
-from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
+try:
+    from langchain_chroma import Chroma
+except ModuleNotFoundError:  # pragma: no cover - compatibility fallback
+    from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
@@ -17,6 +21,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from modsa_rag.config import Settings
 
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_SUFFIXES = {".pdf", ".txt", ".md", ".json"}
 MANIFEST_FILE = "source_manifest.json"
@@ -97,18 +103,32 @@ def save_manifest(settings: Settings, manifest: dict[str, object]) -> None:
     )
 
 
-def load_documents(files: list[Path]) -> list[Document]:
+def collection_document_count(settings: Settings) -> int:
+    vector_store = get_vector_store(settings)
+    collection = getattr(vector_store, "_collection", None)
+    if collection is None:
+        return 0
+    return int(collection.count())
+
+
+def load_documents(files: list[Path]) -> tuple[list[Document], list[dict[str, object]]]:
     documents: list[Document] = []
+    skipped: list[dict[str, object]] = []
     for path in files:
         suffix = path.suffix.lower()
-        if suffix == ".pdf":
-            loaded = PyPDFLoader(str(path)).load()
-        else:
-            loaded = TextLoader(str(path), encoding="utf-8").load()
+        try:
+            if suffix == ".pdf":
+                loaded = PyPDFLoader(str(path)).load()
+            else:
+                loaded = TextLoader(str(path), encoding="utf-8").load()
+        except ImportError as exc:
+            logger.warning("Skipping %s because a loader dependency is missing: %s", path, exc)
+            skipped.append({"source": str(path), "reason": str(exc)})
+            continue
         for document in loaded:
             document.metadata["source"] = str(path)
             documents.append(document)
-    return documents
+    return documents, skipped
 
 
 def split_documents(settings: Settings, documents: list[Document]) -> list[Document]:
@@ -135,11 +155,17 @@ def ingest_sources(settings: Settings, force: bool = False) -> dict[str, object]
     previous_manifest = load_manifest(settings)
 
     if not force and previous_manifest == current_manifest:
-        return {
-            "status": "skipped",
-            "reason": "source files unchanged",
-            "files": len(files),
-        }
+        indexed_documents = collection_document_count(settings)
+        if files and indexed_documents == 0:
+            logger.warning(
+                "Source manifest matches but the Chroma collection is empty; rebuilding index.",
+            )
+        else:
+            return {
+                "status": "skipped",
+                "reason": "source files unchanged",
+                "files": len(files),
+            }
 
     reset_collection(settings)
 
@@ -152,7 +178,17 @@ def ingest_sources(settings: Settings, force: bool = False) -> dict[str, object]
             "chunks": 0,
         }
 
-    documents = load_documents(files)
+    documents, skipped = load_documents(files)
+    if not documents:
+        save_manifest(settings, current_manifest)
+        return {
+            "status": "empty",
+            "reason": "no documents could be loaded",
+            "files": len(files),
+            "chunks": 0,
+            "skipped": skipped,
+        }
+
     chunks = split_documents(settings, documents)
     vector_store = get_vector_store(settings)
     vector_store.add_documents(chunks)
@@ -163,4 +199,5 @@ def ingest_sources(settings: Settings, force: bool = False) -> dict[str, object]
         "files": len(files),
         "documents": len(documents),
         "chunks": len(chunks),
+        "skipped": skipped,
     }

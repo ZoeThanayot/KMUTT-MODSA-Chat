@@ -12,10 +12,21 @@ The starter uses:
 
 ## Setup
 
+### For MacOS and Linux
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
+```
+
+### For Windows users
+
+```bash
+python -m venv .venv
+.venv/Script/activate
+pip intsall -r requirements.txt
 cp .env.example .env
 ```
 
@@ -31,6 +42,18 @@ LLM_MODEL=your-chat-model
 EMBEDDING_BASE_URL=https://your-embedding-provider.example/v1
 EMBEDDING_API_KEY=your-embedding-key
 EMBEDDING_MODEL=your-embedding-model
+
+# RAG storage and ingestion
+CHROMA_DIR="chroma_db"
+CHROMA_COLLECTION="modsa_kmutt"
+RAG_SOURCE_PATHS="knowledge,MODsa-proposal_students.pdf"
+CHUNK_SIZE="1000"
+CHUNK_OVERLAP="150"
+RETRIEVAL_K="4"
+
+# API
+APP_HOST="127.0.0.1"
+APP_PORT="8000"
 ```
 
 ## Add Knowledge Files

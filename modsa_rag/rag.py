@@ -21,6 +21,16 @@ Retrieved context:
 {context}
 """
 
+NO_VERIFIED_INFO_TH = (
+    "ขออภัยครับ/ค่ะ ตอนนี้ผมยังไม่พบข้อมูลยืนยันจากฐานความรู้ที่เกี่ยวข้องกับคำถามนี้ "
+    "แนะนำให้ตรวจสอบกับหน่วยงานของ KMUTT ที่เกี่ยวข้องโดยตรง"
+)
+
+NO_VERIFIED_INFO_EN = (
+    "Sorry, I do not have enough verified information in the knowledge base to answer this confidently. "
+    "Please confirm with the relevant KMUTT office."
+)
+
 
 def build_llm(settings: Settings) -> ChatOpenAI:
     return ChatOpenAI(
@@ -60,10 +70,31 @@ def source_summary(docs) -> list[dict[str, object]]:
     return sources
 
 
-def answer_question(settings: Settings, question: str) -> dict[str, object]:
+def is_thai_text(text: str) -> bool:
+    return any("\u0E00" <= char <= "\u0E7F" for char in text)
+
+
+def retrieve_documents(settings: Settings, question: str):
     vector_store = get_vector_store(settings)
+    if hasattr(vector_store, "similarity_search"):
+        return vector_store.similarity_search(question, k=settings.retrieval_k)
+
     retriever = vector_store.as_retriever(search_kwargs={"k": settings.retrieval_k})
-    docs = retriever.invoke(question)
+    return retriever.invoke(question)
+
+
+def no_verified_info_response(question: str) -> str:
+    return NO_VERIFIED_INFO_TH if is_thai_text(question) else NO_VERIFIED_INFO_EN
+
+
+def answer_question(settings: Settings, question: str) -> dict[str, object]:
+    docs = retrieve_documents(settings, question)
+
+    if not docs:
+        return {
+            "answer": no_verified_info_response(question),
+            "sources": [],
+        }
 
     prompt = ChatPromptTemplate.from_messages(
         [

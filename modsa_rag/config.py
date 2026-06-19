@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=1000, alias="CHUNK_SIZE")
     chunk_overlap: int = Field(default=150, alias="CHUNK_OVERLAP")
     retrieval_k: int = Field(default=4, alias="RETRIEVAL_K")
+    retrieval_min_relevance: float = Field(default=0.35, alias="RETRIEVAL_MIN_RELEVANCE")
 
     app_host: str = Field(default="127.0.0.1", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
